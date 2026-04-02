@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Offline AI Smart Notepad</title>
+    <style>
+        body {
+            font-family: Arial;
+            text-align: center;
+            background: #f5f5f5;
+        }
+
+        canvas {
+            border: 2px solid black;
+            background: white;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px;
+        }
+
+        input, textarea {
+            width: 80%;
+            padding: 8px;
+            margin: 5px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h2>Offline AI Smart Notepad (Prototype)</h2>
+
+<canvas id="board" width="800" height="400"></canvas><br>
+
+<button onclick="clearBoard()">Clear Board</button>
+
+<h3>Math Solver</h3>
+<input id="mathInput" placeholder="Enter math (example: sqrt(9)+3)">
+<button onclick="solveMath()">Solve</button>
+
+<h3>Code Converter</h3>
+<textarea id="codeInput" rows="4" placeholder="Write simple logic"></textarea><br>
+<button onclick="convertCode()">Convert</button>
+<button onclick="saveCode()">Save Code</button>
+
+<h3>Export</h3>
+<button onclick="exportPDF()">Export to PDF</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<script>
+
+// Drawing
+let canvas = document.getElementById("board");
+let ctx = canvas.getContext("2d");
+
+let drawing = false;
+
+canvas.addEventListener("mousedown", () => drawing = true);
+canvas.addEventListener("mouseup", () => drawing = false);
+canvas.addEventListener("mousemove", draw);
+
+function draw(e) {
+    if (!drawing) return;
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineTo(e.offsetX, e.offsetY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(e.offsetX, e.offsetY);
+}
+
+function clearBoard() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+// Math Solver
+function solveMath() {
+    let input = document.getElementById("mathInput").value;
+
+    try {
+        let result = eval(input.replace("sqrt", "Math.sqrt"));
+        document.getElementById("mathInput").value = result;
+    } catch {
+        document.getElementById("mathInput").value = "Invalid Expression";
+    }
+}
+
+// Code Converter
+function convertCode() {
+    let text = document.getElementById("codeInput").value.toLowerCase();
+
+    if (text.includes("for") && text.includes("range")) {
+        document.getElementById("codeInput").value =
+`for i in range(5):
+    print(i)`;
+    }
+    else if (text.includes("if")) {
+        document.getElementById("codeInput").value =
+`if condition:
+    print("True")`;
+    }
+    else {
+        document.getElementById("codeInput").value =
+`for i in range(5):
+    print(i)`;
+    }
+}
+
+// Save Code
+function saveCode() {
+    let text = document.getElementById("codeInput").value;
+    let blob = new Blob([text], { type: "text/plain" });
+
+    let a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "code.py";
+    a.click();
+}
+
+// Export PDF
+function exportPDF() {
+    const { jsPDF } = window.jspdf;
+    let doc = new jsPDF();
+
+    doc.text("Smart Notepad Notes", 10, 10);
+
+    let code = document.getElementById("codeInput").value;
+    doc.text(code, 10, 20);
+
+    doc.save("notes.pdf");
+}
+
+</script>
+
+</body>
+</html>
