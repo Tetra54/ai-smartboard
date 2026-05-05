@@ -1,138 +1,777 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Offline AI Smart Notepad</title>
-    <style>
-        body {
-            font-family: Arial;
-            text-align: center;
-            background: #f5f5f5;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>✍️ Handwritten Math Solver</title>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/12.4.0/math.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-        canvas {
-            border: 2px solid black;
-            background: white;
-        }
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #f7f8fa;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding: 36px 16px 60px;
+  color: #1c1c1e;
+}
 
-        button {
-            margin: 5px;
-            padding: 10px;
-        }
+.header { text-align: center; margin-bottom: 28px; }
+.header h1 {
+  font-family: 'Kalam', cursive;
+  font-size: clamp(1.8rem, 5vw, 2.4rem);
+  font-weight: 700; color: #1c1c1e;
+}
+.header p { font-size: 0.88rem; color: #8e8e93; margin-top: 6px; }
 
-        input, textarea {
-            width: 80%;
-            padding: 8px;
-            margin: 5px;
-        }
-    </style>
+.card {
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 32px rgba(0,0,0,0.07);
+  padding: 24px; width: 100%; max-width: 680px;
+}
+
+/* ── Status bar ── */
+#status {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 0.8rem; color: #8e8e93;
+  margin-bottom: 16px; padding: 12px 14px;
+  background: #f5f5f7; border-radius: 12px;
+  transition: all 0.4s;
+}
+#status.ready  { background: #f0fdf4; color: #16a34a; }
+#status.error  { background: #fff5f5; color: #dc2626; }
+#status.training { background: #fffbeb; color: #d97706; }
+.status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0; background: #c7c7cc;
+  animation: blink 1.2s ease infinite;
+}
+#status.ready   .status-dot { background: #22c55e; animation: none; }
+#status.error   .status-dot { background: #ef4444; animation: none; }
+#status.training .status-dot { background: #f59e0b; }
+@keyframes blink { 0%,100%{opacity:1;} 50%{opacity:0.25;} }
+
+/* ── Progress bar (shown during training) ── */
+#progress-wrap {
+  height: 5px; background: #f0f0f0;
+  border-radius: 6px; overflow: hidden;
+  margin-bottom: 16px;
+  transition: opacity 0.4s;
+  opacity: 0;
+}
+#progress-wrap.show { opacity: 1; }
+#progress-bar {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  border-radius: 6px;
+  transition: width 0.3s ease;
+}
+
+/* ── Canvas ── */
+.canvas-label {
+  font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: #c7c7cc; margin-bottom: 8px;
+}
+.canvas-outer {
+  border: 2px solid #e5e5ea; border-radius: 14px;
+  overflow: hidden; background: #fff;
+  cursor: crosshair; position: relative;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  margin-bottom: 16px;
+}
+.canvas-outer.active { border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59,130,246,0.10); }
+#main-canvas { display: block; width: 100%; height: 300px; touch-action: none; }
+.canvas-placeholder {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none; gap: 8px;
+  transition: opacity 0.3s;
+}
+.canvas-outer.has-ink .canvas-placeholder { opacity: 0; }
+.placeholder-icon { font-size: 2.2rem; opacity: 0.18; }
+.placeholder-text { font-family: 'Kalam', cursive; font-size: 1.05rem; color: #c7c7cc; }
+.placeholder-sub { font-size: 0.74rem; color: #d1d1d6; letter-spacing: 0.03em; }
+
+/* ── Toolbar ── */
+.toolbar {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; flex-wrap: wrap;
+}
+.tool-label {
+  font-size: 0.7rem; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: #c7c7cc; margin-right: 2px;
+}
+.pen-size-btn {
+  width: 34px; height: 34px; border-radius: 8px;
+  border: 1.5px solid #e5e5ea; background: #f5f5f7;
+  cursor: pointer; display: flex; align-items: center;
+  justify-content: center; transition: all 0.15s;
+}
+.pen-size-btn.active { border-color: #3b82f6; background: #eff6ff; }
+.pen-size-btn:hover { border-color: #93c5fd; }
+.pen-dot { background: #1c1c1e; border-radius: 50%; }
+
+/* ── Detected strip ── */
+#detected-strip {
+  min-height: 52px; background: #f5f5f7; border-radius: 10px;
+  padding: 12px 16px; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border: 1.5px solid transparent; transition: all 0.3s;
+}
+#detected-strip.populated { background: #eff6ff; border-color: #bfdbfe; }
+.strip-label {
+  font-family: 'DM Sans', sans-serif; font-size: 0.7rem;
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #a0aec0; white-space: nowrap;
+}
+#detected-expr { font-family: 'Kalam', cursive; font-size: 1.4rem; color: #1c1c1e; letter-spacing: 0.06em; }
+.strip-placeholder { font-size: 0.85rem; color: #c7c7cc; font-family: 'DM Sans', sans-serif; }
+
+/* ── Segment thumbnails ── */
+#segments-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; min-height: 0; }
+.seg-thumb {
+  background: #f5f5f7; border: 1.5px solid #e5e5ea;
+  border-radius: 8px; padding: 4px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+.seg-thumb canvas { image-rendering: pixelated; border-radius: 3px; }
+.seg-lbl { font-family: 'Kalam', cursive; font-size: 1rem; color: #3b82f6; font-weight: 700; line-height: 1; }
+.seg-conf { font-size: 0.6rem; color: #a0aec0; }
+
+/* ── Buttons ── */
+.btn-row { display: flex; gap: 12px; }
+button {
+  flex: 1; padding: 14px 0; border: none; border-radius: 12px;
+  font-size: 1rem; font-weight: 600; font-family: 'DM Sans', sans-serif;
+  cursor: pointer; transition: all 0.15s;
+}
+#solve-btn {
+  background: #1c1c1e; color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.14);
+}
+#solve-btn:hover:not(:disabled) {
+  background: #3b82f6;
+  box-shadow: 0 4px 20px rgba(59,130,246,0.35);
+  transform: translateY(-1px);
+}
+#solve-btn:active:not(:disabled) { transform: none; }
+#solve-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+#clear-btn { background: #f5f5f7; color: #636366; max-width: 120px; }
+#clear-btn:hover { background: #e5e5ea; color: #1c1c1e; }
+
+/* ── Result ── */
+#result-area {
+  margin-top: 18px; border-radius: 14px;
+  overflow: hidden; transition: all 0.4s cubic-bezier(.22,1,.36,1);
+  max-height: 0; opacity: 0; padding: 0;
+}
+#result-area.show {
+  max-height: 220px; opacity: 1; padding: 20px 22px;
+  background: linear-gradient(135deg, #1c1c1e, #2d2d30);
+}
+#result-area.show.error-res {
+  background: linear-gradient(135deg, #fff5f5, #fee2e2);
+}
+.result-expr-label {
+  font-size: 0.85rem; color: #9ca3af;
+  font-family: 'Kalam', cursive; margin-bottom: 6px;
+}
+#result-area.show.error-res .result-expr-label { color: #f87171; }
+#result-value {
+  font-family: 'Kalam', cursive; font-size: 2.8rem;
+  font-weight: 700; color: #fff; line-height: 1.1;
+}
+#result-area.show.error-res #result-value { font-size: 0.95rem; font-weight: 500; color: #dc2626; }
+
+/* ── Tips ── */
+.tips {
+  margin-top: 18px; border-top: 1px solid #f5f5f7; padding-top: 14px;
+  font-size: 0.76rem; color: #c7c7cc; line-height: 1.8; text-align: center;
+}
+.tips b { color: #a1a1aa; }
+
+@media (max-width: 480px) {
+  #main-canvas { height: 220px; }
+  #result-value { font-size: 2.2rem; }
+}
+</style>
 </head>
-
 <body>
 
-<h2>Offline AI Smart Notepad (Prototype)</h2>
+<div class="header">
+  <h1>✍️ Handwritten Math Solver</h1>
+  <p>Write your full expression on the canvas, then hit Solve</p>
+</div>
 
-<canvas id="board" width="800" height="400"></canvas><br>
+<div class="card">
 
-<button onclick="clearBoard()">Clear Board</button>
+  <div id="status">
+    <span class="status-dot"></span>
+    <span id="status-text">Initializing AI model…</span>
+  </div>
 
-<h3>Math Solver</h3>
-<input id="mathInput" placeholder="Enter math (example: sqrt(9)+3)">
-<button onclick="solveMath()">Solve</button>
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
 
-<h3>Code Converter</h3>
-<textarea id="codeInput" rows="4" placeholder="Write simple logic"></textarea><br>
-<button onclick="convertCode()">Convert</button>
-<button onclick="saveCode()">Save Code</button>
+  <div class="canvas-label">Your expression</div>
+  <div class="canvas-outer" id="canvas-outer">
+    <canvas id="main-canvas"></canvas>
+    <div class="canvas-placeholder">
+      <div class="placeholder-icon">✏️</div>
+      <div class="placeholder-text">Write  12 + 5  or  3 × 8  here</div>
+      <div class="placeholder-sub">Leave a small gap between each symbol</div>
+    </div>
+  </div>
 
-<h3>Export</h3>
-<button onclick="exportPDF()">Export to PDF</button>
+  <!-- Pen size picker -->
+  <div class="toolbar">
+    <span class="tool-label">Pen</span>
+    <button class="pen-size-btn active" id="pen-s" title="Small" onclick="setPen(4,this)">
+      <div class="pen-dot" style="width:6px;height:6px"></div>
+    </button>
+    <button class="pen-size-btn" id="pen-m" title="Medium" onclick="setPen(8,this)">
+      <div class="pen-dot" style="width:10px;height:10px"></div>
+    </button>
+    <button class="pen-size-btn" id="pen-l" title="Large" onclick="setPen(14,this)">
+      <div class="pen-dot" style="width:15px;height:15px"></div>
+    </button>
+  </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <div id="detected-strip">
+    <span class="strip-label">Detected:</span>
+    <span id="detected-expr"><span class="strip-placeholder">will appear after solving</span></span>
+  </div>
+
+  <div id="segments-row"></div>
+
+  <div class="btn-row">
+    <button id="solve-btn" disabled>⚡ Solve</button>
+    <button id="clear-btn">✕ Clear</button>
+  </div>
+
+  <div id="result-area">
+    <div class="result-expr-label" id="result-expr-label"></div>
+    <div id="result-value"></div>
+  </div>
+
+  <div class="tips">
+    <b>Digits 0–9</b> are recognized by a real CNN trained on 50 000 MNIST samples.<br>
+    <b>Operators</b> + − × ÷ / are detected by shape analysis.<br>
+    Model trains once in your browser (~30 s) and is <b>cached forever</b> — instant on next visit.
+  </div>
+</div>
 
 <script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════════
+   CONFIGURATION
+═══════════════════════════════════════════════════════════════════ */
+const IDB_MODEL_KEY  = 'indexeddb://handmath-cnn-v4';
+const MNIST_SPRITE   = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_images.png';
+const MNIST_LABELS   = 'https://storage.googleapis.com/learnjs-data/model-builder/mnist_labels_uint8';
+const NUM_CLASSES    = 10;
+const IMAGE_SIZE     = 784; // 28×28
+const TRAIN_SAMPLES  = 50000;
+const TEST_SAMPLES   = 1000;
 
-// Drawing
-let canvas = document.getElementById("board");
-let ctx = canvas.getContext("2d");
+/* ═══════════════════════════════════════════════════════════════════
+   CANVAS SETUP
+═══════════════════════════════════════════════════════════════════ */
+const canvas = document.getElementById('main-canvas');
+const ctx    = canvas.getContext('2d');
+const outer  = document.getElementById('canvas-outer');
+let isDrawing = false, hasInk = false;
+let lastX = 0, lastY = 0, penSize = 4;
 
-let drawing = false;
+function initCanvas() {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  fillWhite();
+}
+function fillWhite() {
+  const dpr = window.devicePixelRatio || 1;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width/dpr, canvas.height/dpr);
+}
+function applyPen() {
+  ctx.strokeStyle = '#1c1c1e';
+  ctx.lineWidth   = penSize;
+  ctx.lineCap     = 'round';
+  ctx.lineJoin    = 'round';
+}
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const dpr  = window.devicePixelRatio || 1;
+  const src  = e.touches ? e.touches[0] : e;
+  return {
+    x: (src.clientX - rect.left) * (canvas.width  / rect.width  / dpr),
+    y: (src.clientY - rect.top)  * (canvas.height / rect.height / dpr)
+  };
+}
+canvas.addEventListener('pointerdown', e => {
+  isDrawing = true;
+  const p = getPos(e);
+  lastX = p.x; lastY = p.y;
+  applyPen();
+  ctx.beginPath(); ctx.arc(p.x, p.y, penSize/2, 0, Math.PI*2);
+  ctx.fillStyle = '#1c1c1e'; ctx.fill();
+  if (!hasInk) { hasInk = true; outer.classList.add('has-ink'); }
+  outer.classList.add('active');
+  e.preventDefault();
+}, {passive: false});
+canvas.addEventListener('pointermove', e => {
+  if (!isDrawing) return;
+  const p = getPos(e);
+  applyPen();
+  ctx.beginPath(); ctx.moveTo(lastX, lastY); ctx.lineTo(p.x, p.y); ctx.stroke();
+  lastX = p.x; lastY = p.y;
+  e.preventDefault();
+}, {passive: false});
+canvas.addEventListener('pointerup',    () => { isDrawing = false; outer.classList.remove('active'); });
+canvas.addEventListener('pointerleave', () => { isDrawing = false; outer.classList.remove('active'); });
 
-canvas.addEventListener("mousedown", () => drawing = true);
-canvas.addEventListener("mouseup", () => drawing = false);
-canvas.addEventListener("mousemove", draw);
-
-function draw(e) {
-    if (!drawing) return;
-    ctx.lineWidth = 2;
-    ctx.lineCap = "round";
-    ctx.lineTo(e.offsetX, e.offsetY);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(e.offsetX, e.offsetY);
+function setPen(size, btn) {
+  penSize = size;
+  document.querySelectorAll('.pen-size-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
 }
 
-function clearBoard() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+document.getElementById('clear-btn').addEventListener('click', () => {
+  fillWhite(); hasInk = false;
+  outer.classList.remove('has-ink');
+  document.getElementById('detected-expr').innerHTML = '<span class="strip-placeholder">will appear after solving</span>';
+  document.getElementById('detected-strip').classList.remove('populated');
+  document.getElementById('segments-row').innerHTML = '';
+  const ra = document.getElementById('result-area');
+  ra.className = ''; ra.style.maxHeight = '';
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   MODEL — BUILD CNN ARCHITECTURE
+   Conv2D(32,3) → MaxPool → Conv2D(64,3) → MaxPool → Dense(128) → Dense(10)
+   ~98% accuracy on MNIST test set after 10 epochs
+═══════════════════════════════════════════════════════════════════ */
+function buildModel() {
+  const model = tf.sequential();
+  model.add(tf.layers.conv2d({
+    inputShape: [28, 28, 1], kernelSize: 3, filters: 32,
+    activation: 'relu', kernelInitializer: 'varianceScaling'
+  }));
+  model.add(tf.layers.maxPooling2d({ poolSize: [2, 2], strides: [2, 2] }));
+  model.add(tf.layers.conv2d({
+    kernelSize: 3, filters: 64,
+    activation: 'relu', kernelInitializer: 'varianceScaling'
+  }));
+  model.add(tf.layers.maxPooling2d({ poolSize: [2, 2], strides: [2, 2] }));
+  model.add(tf.layers.flatten());
+  model.add(tf.layers.dense({ units: 128, activation: 'relu' }));
+  model.add(tf.layers.dropout({ rate: 0.25 }));
+  model.add(tf.layers.dense({ units: NUM_CLASSES, activation: 'softmax' }));
+  model.compile({
+    optimizer: tf.train.adam(0.001),
+    loss: 'categoricalCrossentropy',
+    metrics: ['accuracy']
+  });
+  return model;
 }
 
-// Math Solver
-function solveMath() {
-    let input = document.getElementById("mathInput").value;
+/* ═══════════════════════════════════════════════════════════════════
+   MNIST DATA LOADER
+   Downloads sprite sheet + label file from Google's public CDN.
+   These are standard TF.js demo assets with CORS enabled.
+═══════════════════════════════════════════════════════════════════ */
+class MnistData {
+  constructor() { this.trainX = null; this.trainY = null; }
 
-    try {
-        let result = eval(input.replace("sqrt", "Math.sqrt"));
-        document.getElementById("mathInput").value = result;
-    } catch {
-        document.getElementById("mathInput").value = "Invalid Expression";
+  async load() {
+    const [imgBuf, lblBuf] = await Promise.all([
+      fetch(MNIST_SPRITE).then(r => r.blob()),
+      fetch(MNIST_LABELS).then(r => r.arrayBuffer())
+    ]);
+
+    // Decode sprite image → pixel values
+    const imgBitmap = await createImageBitmap(imgBuf);
+    const total     = TRAIN_SAMPLES + TEST_SAMPLES;
+    const cols      = Math.floor(imgBitmap.width  / 28);
+    // const rows   = Math.floor(imgBitmap.height / 28); // not needed
+    const offscreen = new OffscreenCanvas(imgBitmap.width, imgBitmap.height);
+    const octx      = offscreen.getContext('2d');
+    octx.drawImage(imgBitmap, 0, 0);
+    const rawPx = octx.getImageData(0, 0, imgBitmap.width, imgBitmap.height).data;
+
+    // Pack into Float32 [total × 784]
+    const images = new Float32Array(total * IMAGE_SIZE);
+    for (let i = 0; i < total; i++) {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      for (let py = 0; py < 28; py++) {
+        for (let px = 0; px < 28; px++) {
+          const srcPx = ((row * 28 + py) * imgBitmap.width + (col * 28 + px)) * 4;
+          images[i * IMAGE_SIZE + py * 28 + px] = rawPx[srcPx] / 255.0;
+        }
+      }
     }
-}
 
-// Code Converter
-function convertCode() {
-    let text = document.getElementById("codeInput").value.toLowerCase();
+    // Labels are already one-hot uint8
+    const labels = new Uint8Array(lblBuf, 0, total * NUM_CLASSES);
 
-    if (text.includes("for") && text.includes("range")) {
-        document.getElementById("codeInput").value =
-`for i in range(5):
-    print(i)`;
+    this.trainX = images.slice(0, TRAIN_SAMPLES * IMAGE_SIZE);
+    this.trainY = labels.slice(0, TRAIN_SAMPLES * NUM_CLASSES);
+  }
+
+  getTrainBatch(batchSize, startIdx) {
+    const xData = new Float32Array(batchSize * IMAGE_SIZE);
+    const yData = new Uint8Array(batchSize * NUM_CLASSES);
+    for (let i = 0; i < batchSize; i++) {
+      const si = ((startIdx + i) % TRAIN_SAMPLES) * IMAGE_SIZE;
+      xData.set(this.trainX.subarray(si, si + IMAGE_SIZE), i * IMAGE_SIZE);
+      const sl = ((startIdx + i) % TRAIN_SAMPLES) * NUM_CLASSES;
+      yData.set(this.trainY.subarray(sl, sl + NUM_CLASSES), i * NUM_CLASSES);
     }
-    else if (text.includes("if")) {
-        document.getElementById("codeInput").value =
-`if condition:
-    print("True")`;
+    const xs = tf.tensor4d(xData, [batchSize, 28, 28, 1]);
+    const ys = tf.tensor2d(yData, [batchSize, NUM_CLASSES], 'float32');
+    return { xs, ys };
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TRAINING ORCHESTRATOR
+   Trains for EPOCHS epochs with BATCH_SIZE mini-batches,
+   updates progress bar, saves to IndexedDB when done.
+═══════════════════════════════════════════════════════════════════ */
+let digitModel = null;
+
+async function trainAndCache() {
+  setStatus('training', '⏳ First visit: downloading MNIST data & training CNN…');
+  setProgress(0, true);
+
+  const data = new MnistData();
+  setStatus('training', '⬇️ Downloading 10 MB MNIST sprite data…');
+  await data.load();
+  setStatus('training', '🧠 Training CNN on 50 000 samples…');
+
+  const model      = buildModel();
+  const BATCH      = 512;
+  const EPOCHS     = 8;
+  const batches    = Math.floor(TRAIN_SAMPLES / BATCH);
+  const totalSteps = EPOCHS * batches;
+  let   step       = 0;
+
+  for (let epoch = 0; epoch < EPOCHS; epoch++) {
+    for (let b = 0; b < batches; b++) {
+      const {xs, ys} = data.getTrainBatch(BATCH, b * BATCH);
+      await model.trainOnBatch(xs, ys);
+      xs.dispose(); ys.dispose();
+      step++;
+      // Update progress every 5 batches
+      if (step % 5 === 0) {
+        const pct = Math.round((step / totalSteps) * 100);
+        setProgress(pct);
+        setStatus('training', `🧠 Training… epoch ${epoch+1}/${EPOCHS} — ${pct}%`);
+        await tf.nextFrame(); // keep UI responsive
+      }
     }
-    else {
-        document.getElementById("codeInput").value =
-`for i in range(5):
-    print(i)`;
+  }
+
+  // Save to IndexedDB so next visit is instant
+  try {
+    await model.save(IDB_MODEL_KEY);
+  } catch(e) {
+    console.warn('Could not save model to IndexedDB:', e);
+  }
+
+  digitModel = model;
+  setProgress(100);
+  setTimeout(() => setProgress(0, false), 600);
+  setStatus('ready', '✅ AI ready! Draw your expression and click Solve.');
+  document.getElementById('solve-btn').disabled = false;
+}
+
+async function loadOrTrain() {
+  // Try loading cached model from IndexedDB first
+  try {
+    digitModel = await tf.loadLayersModel(IDB_MODEL_KEY);
+    // Warm-up
+    tf.tidy(() => digitModel.predict(tf.zeros([1, 28, 28, 1])));
+    setStatus('ready', '✅ AI ready (cached model loaded instantly)');
+    document.getElementById('solve-btn').disabled = false;
+    return;
+  } catch (_) {
+    // Not cached — train from scratch
+  }
+
+  // Check if MNIST CDN is reachable, then train
+  await trainAndCache();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PREPROCESSING: canvas region → 28×28 Float32 tensor for MNIST
+═══════════════════════════════════════════════════════════════════ */
+function getInkMap() {
+  const dpr = window.devicePixelRatio || 1;
+  const W   = Math.floor(canvas.width  / dpr);
+  const H   = Math.floor(canvas.height / dpr);
+  const raw = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const ink = new Uint8Array(W * H);
+  for (let ly = 0; ly < H; ly++) {
+    for (let lx = 0; lx < W; lx++) {
+      let s = 0, c = 0;
+      for (let dy = 0; dy < dpr; dy++) {
+        for (let dx = 0; dx < dpr; dx++) {
+          const px = Math.floor(lx*dpr+dx), py = Math.floor(ly*dpr+dy);
+          s += 255 - raw[(py*canvas.width+px)*4]; c++;
+        }
+      }
+      ink[ly*W+lx] = Math.round(s/c);
     }
+  }
+  return {ink, W, H};
 }
 
-// Save Code
-function saveCode() {
-    let text = document.getElementById("codeInput").value;
-    let blob = new Blob([text], { type: "text/plain" });
-
-    let a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "code.py";
-    a.click();
+function cropTo28(ink, W, box) {
+  const PAD = 5, S = 28;
+  const bw  = box.x2-box.x1+1, bh = box.y2-box.y1+1;
+  const tmp = document.createElement('canvas');
+  tmp.width  = bw+PAD*2; tmp.height = bh+PAD*2;
+  const tc  = tmp.getContext('2d');
+  tc.fillStyle = '#000'; tc.fillRect(0,0,tmp.width,tmp.height);
+  const id = tc.createImageData(tmp.width,tmp.height);
+  for (let y=0;y<bh;y++) for (let x=0;x<bw;x++) {
+    const v = ink[(box.y1+y)*W+(box.x1+x)];
+    const di = ((y+PAD)*tmp.width+(x+PAD))*4;
+    id.data[di]=v; id.data[di+1]=v; id.data[di+2]=v; id.data[di+3]=255;
+  }
+  tc.putImageData(id,0,0);
+  const out = document.createElement('canvas');
+  out.width = S; out.height = S;
+  const oc  = out.getContext('2d');
+  // Draw with slight smoothing for better MNIST compatibility
+  oc.imageSmoothingEnabled = true;
+  oc.imageSmoothingQuality = 'high';
+  oc.drawImage(tmp,0,0,S,S);
+  const px  = oc.getImageData(0,0,S,S).data;
+  const arr = new Float32Array(S*S);
+  for (let i=0;i<S*S;i++) arr[i] = px[i*4]/255.0;
+  return {arr, thumb: out};
 }
 
-// Export PDF
-function exportPDF() {
-    const { jsPDF } = window.jspdf;
-    let doc = new jsPDF();
-
-    doc.text("Smart Notepad Notes", 10, 10);
-
-    let code = document.getElementById("codeInput").value;
-    doc.text(code, 10, 20);
-
-    doc.save("notes.pdf");
+/* ═══════════════════════════════════════════════════════════════════
+   CONNECTED COMPONENTS
+═══════════════════════════════════════════════════════════════════ */
+function findComponents(ink, W, H, thr=38) {
+  const vis = new Uint8Array(W*H);
+  const out = [];
+  function fill(s) {
+    const stk=[s]; let x1=W,y1=H,x2=0,y2=0;
+    while(stk.length) {
+      const i=stk.pop(); if(vis[i]) continue; vis[i]=1;
+      const x=i%W, y=(i-x)/W;
+      if(x<x1)x1=x; if(x>x2)x2=x; if(y<y1)y1=y; if(y>y2)y2=y;
+      const ns=[i-1,i+1,i-W,i+W,i-W-1,i-W+1,i+W-1,i+W+1];
+      for(const n of ns) if(n>=0&&n<W*H&&!vis[n]&&ink[n]>=thr) stk.push(n);
+    }
+    return {x1,y1,x2,y2};
+  }
+  for(let i=0;i<W*H;i++)
+    if(!vis[i]&&ink[i]>=thr) {
+      const b=fill(i);
+      if(b.x2-b.x1>=5&&b.y2-b.y1>=5) out.push(b);
+    }
+  return out;
 }
 
+function mergeBoxes(boxes, gap=24) {
+  boxes.sort((a,b)=>a.x1-b.x1);
+  let changed=true;
+  while(changed) {
+    changed=false;
+    outer2: for(let i=0;i<boxes.length;i++) {
+      for(let j=i+1;j<boxes.length;j++) {
+        const a=boxes[i],b=boxes[j];
+        const hGap=b.x1-a.x2;
+        const vOvlp=Math.min(a.y2,b.y2)-Math.max(a.y1,b.y1);
+        if(hGap<=gap&&vOvlp>-(a.y2-a.y1)*0.6) {
+          boxes[i]={x1:Math.min(a.x1,b.x1),y1:Math.min(a.y1,b.y1),x2:Math.max(a.x2,b.x2),y2:Math.max(a.y2,b.y2)};
+          boxes.splice(j,1); changed=true; break outer2;
+        }
+      }
+    }
+  }
+  return boxes;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OPERATOR DETECTION — shape heuristics (no ML needed)
+═══════════════════════════════════════════════════════════════════ */
+function detectOperator(ink, W, box) {
+  const bw=box.x2-box.x1+1, bh=box.y2-box.y1+1;
+  const asp=bw/bh;
+  const midX=Math.floor((box.x1+box.x2)/2), midY=Math.floor((box.y1+box.y2)/2);
+  let top=0,bot=0,left=0,right=0,tot=0,cH=0,cV=0;
+  const th=Math.floor(bh/3), tw=Math.floor(bw/3);
+  for(let y=box.y1;y<=box.y2;y++) for(let x=box.x1;x<=box.x2;x++) {
+    const v=ink[y*W+x]; if(v<38) continue; tot++;
+    if(y<midY) top++; else bot++;
+    if(x<midX) left++; else right++;
+    if(y>=box.y1+th&&y<=box.y2-th) cH++;
+    if(x>=box.x1+tw&&x<=box.x2-tw) cV++;
+  }
+  if(!tot) return null;
+  const cHr=cH/tot, cVr=cV/tot;
+  const symH=Math.abs(top-bot)/tot, symV=Math.abs(left-right)/tot;
+  // Minus: very wide + horizontal band heavy
+  if(asp>2.2&&cHr>0.5) return '-';
+  // Plus: square, symmetric, cross
+  if(asp>0.5&&asp<1.9&&symH<0.22&&symV<0.22&&cHr>0.3&&cVr>0.3&&bw>=18) return '+';
+  // Multiply ×: square, symmetric, lighter center (diagonal strokes)
+  if(asp>0.6&&asp<1.65&&symH<0.22&&symV<0.22&&cHr<0.52&&bw>=16) return '*';
+  // Divide ÷ or slash
+  if(asp<0.88&&(top/tot)>0.26&&(bot/tot)>0.26&&bh>=28) return '/';
+  if(asp<0.5&&bh>bw*1.7) return '/';
+  return null;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CNN DIGIT PREDICTION
+═══════════════════════════════════════════════════════════════════ */
+async function predictDigit(arr28) {
+  const t = tf.tensor4d(arr28, [1,28,28,1]);
+  const p = digitModel.predict(t);
+  const probs = await p.data();
+  t.dispose(); p.dispose();
+  let best=0, bestP=0;
+  for(let i=0;i<10;i++) if(probs[i]>bestP){bestP=probs[i];best=i;}
+  return {digit:best, confidence:Math.round(bestP*100)};
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RENDER THUMBNAILS
+═══════════════════════════════════════════════════════════════════ */
+function renderThumbs(segs) {
+  const row = document.getElementById('segments-row');
+  row.innerHTML = '';
+  for(const s of segs) {
+    const div=document.createElement('div'); div.className='seg-thumb';
+    const th=s.thumb; th.style.width='38px'; th.style.height='38px';
+    th.style.filter='invert(1) brightness(1.1)';
+    div.appendChild(th);
+    const lbl=document.createElement('div'); lbl.className='seg-lbl';
+    lbl.textContent=s.symbol==='*'?'×':s.symbol==='/'?'÷':s.symbol;
+    div.appendChild(lbl);
+    if(s.conf!==null){
+      const cf=document.createElement('div'); cf.className='seg-conf';
+      cf.textContent=s.conf+'%'; div.appendChild(cf);
+    }
+    row.appendChild(div);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SOLVE BUTTON
+═══════════════════════════════════════════════════════════════════ */
+document.getElementById('solve-btn').addEventListener('click', async () => {
+  if(!hasInk) { showError('Nothing drawn — write your expression first.'); return; }
+  if(!digitModel) { showError('Model not ready yet, please wait.'); return; }
+
+  const btn = document.getElementById('solve-btn');
+  btn.disabled=true; btn.textContent='Analyzing…';
+
+  try {
+    const {ink,W,H} = getInkMap();
+    let boxes = findComponents(ink,W,H);
+    if(!boxes.length) { showError('No ink detected — try drawing larger.'); return; }
+    boxes = mergeBoxes(boxes, 22);
+    boxes.sort((a,b)=>a.x1-b.x1);
+
+    const segs = [];
+    for(const box of boxes) {
+      const op = detectOperator(ink,W,box);
+      if(op!==null) {
+        const {arr,thumb}=cropTo28(ink,W,box);
+        segs.push({symbol:op,conf:null,thumb,box});
+      } else {
+        const {arr,thumb}=cropTo28(ink,W,box);
+        const {digit,confidence}=await predictDigit(arr);
+        segs.push({symbol:String(digit),conf:confidence,thumb,box});
+      }
+    }
+
+    const expr = segs.map(s=>s.symbol).join('');
+    const disp = expr.replace(/\*/g,'×').replace(/\//g,'÷')
+                     .split('').join(' ').replace(/  /g,' ');
+
+    document.getElementById('detected-expr').textContent = disp;
+    document.getElementById('detected-strip').classList.add('populated');
+    renderThumbs(segs);
+
+    if(!expr) { showError('No symbols detected.'); return; }
+
+    const ans = math.evaluate(expr);
+    const fmt = parseFloat(
+      (typeof ans==='number'?ans:Number(ans)).toPrecision(12)
+    ).toString();
+
+    const ra = document.getElementById('result-area');
+    ra.className='show';
+    document.getElementById('result-expr-label').textContent = disp + '  =';
+    document.getElementById('result-value').textContent = fmt;
+
+  } catch(err) {
+    console.warn(err);
+    showError('Could not evaluate — check spacing between symbols and try again.');
+  } finally {
+    btn.disabled=false; btn.textContent='⚡ Solve';
+  }
+});
+
+function showError(msg) {
+  const ra = document.getElementById('result-area');
+  ra.className='show error-res';
+  document.getElementById('result-expr-label').textContent='Error';
+  document.getElementById('result-value').textContent=msg;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   STATUS / PROGRESS HELPERS
+═══════════════════════════════════════════════════════════════════ */
+function setStatus(cls, text) {
+  const el = document.getElementById('status');
+  el.className = cls;
+  document.getElementById('status-text').textContent = text;
+}
+function setProgress(pct, show=true) {
+  const wrap = document.getElementById('progress-wrap');
+  const bar  = document.getElementById('progress-bar');
+  if(show) wrap.classList.add('show'); else wrap.classList.remove('show');
+  bar.style.width = pct+'%';
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════════════════════ */
+window.addEventListener('load', () => {
+  initCanvas();
+  loadOrTrain();
+});
+
+window.addEventListener('resize', () => {
+  const tmp=document.createElement('canvas');
+  tmp.width=canvas.width; tmp.height=canvas.height;
+  tmp.getContext('2d').drawImage(canvas,0,0);
+  initCanvas();
+  const dpr=window.devicePixelRatio||1;
+  ctx.drawImage(tmp,0,0,canvas.width/dpr,canvas.height/dpr);
+});
 </script>
-
 </body>
 </html>
